@@ -93,14 +93,30 @@ M5Stick Mic -> Groq STT (whisper-large-v3-turbo) -> Hermes Chat -> Response on d
    pio run --environment m5stickc-plus
    ```
 
+   > If `pio` is not found (not in PATH), use `python3 -m platformio` instead:
+   > ```bash
+   > python3 -m platformio pkg install
+   > python3 -m platformio run --environment m5stickc-plus
+   > ```
+
 3. Upload firmware via USB:
    ```bash
    pio run --environment m5stickc-plus -t upload
    ```
 
+   Or if using the Python module:
+   ```bash
+   python3 -m platformio run --environment m5stickc-plus -t upload
+   ```
+
 4. To erase NVS and do a clean flash:
    ```bash
    pio run --environment m5stickc-plus -t erase && pio run -t upload
+   ```
+
+   Or with Python module:
+   ```bash
+   python3 -m platformio run --environment m5stickc-plus -t erase && python3 -m platformio run -t upload
    ```
 
 ## Project Structure
