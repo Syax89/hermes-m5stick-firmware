@@ -772,6 +772,9 @@ static void clockLandscapeCompose(TFT_eSPI* t, const Palette& p) {
   t->setTextSize(3); t->setTextColor(p.text, p.bg);    t->drawString(hm, 170, 42);
   t->setTextSize(2); t->setTextColor(p.textDim, p.bg); t->drawString(ssl, 170, 72);
                                                        t->drawString(wdl, 170, 102);
+  if (!_onUsb) {
+    t->setTextSize(1); t->setTextColor(0xF800, p.bg);  t->drawString("No USB", 170, 120);
+  }
   t->setTextDatum(TL_DATUM);
   t->setTextSize(1);
 }
@@ -792,6 +795,10 @@ static void drawClock() {
     spr.setTextSize(4); spr.setTextColor(p.text, p.bg);    spr.drawString(hm, CX, 140);
     spr.setTextSize(2); spr.setTextColor(p.textDim, p.bg); spr.drawString(ss, CX, 175);
     spr.setTextSize(1);                                     spr.drawString(dl, CX, 200);
+    if (!_onUsb) {
+      spr.setTextColor(0xF800, p.bg);
+      spr.drawString("No USB", CX, 218);
+    }
     spr.setTextDatum(TL_DATUM);
     return;
   }
@@ -2530,8 +2537,7 @@ void loop() {
   bool clocking = displayMode == DISP_NORMAL
                && !menuOpen && !settingsOpen && !resetOpen && !inPrompt
                && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
-               && voiceState == VOICE_NONE
-               && _onUsb;
+               && voiceState == VOICE_NONE;
   // Busy panel: Hermes is running. Same screen split as the resting clock
   // (buddy peeks up top, info panel below) but with the working buddy and
   // live session stats. Mutually exclusive with clocking (needs running>0).
