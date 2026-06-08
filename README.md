@@ -1,10 +1,26 @@
-# hermes-desktop-buddy
+# 🤖 Hermes M5Stick Firmware
 
-Hermes Desktop Buddy is a physical companion device built on the **M5StickC PLUS2** (ESP32) platform that connects directly to your **Hermes API Daemon** over Wi-Fi. It allows you to monitor agent runs, receive real-time notifications (including chirps and LED blinks), and approve or deny tool execution prompts right from your desk.
+**Firmware per M5StickC Plus 2** — un companion device fisico che si collega via Wi-Fi a **Hermes Agent**, monitora le sessioni, gestisce le richieste di approvazione, e permette l'invio di comandi vocali.
 
-## Architecture
+![M5StickC Plus 2](https://img.shields.io/badge/hardware-M5StickC%20Plus%202-1a73e8?style=flat-square)
+![PlatformIO](https://img.shields.io/badge/framework-PlatformIO-ff5a00?style=flat-square)
+![ESP32](https://img.shields.io/badge/soc-ESP32--S3-black?style=flat-square)
 
-Unlike the original Bluetooth BLE implementation, this version connects directly to the Hermes API Gateway over Wi-Fi. It polls `/v1/runs/current` and interacts with the `/v1/runs/current/approval` endpoint.
+---
+
+## ✨ Funzionalità
+
+- 📊 **Dashboard in tempo reale** — mostra sessioni correnti, token usati, stato esecuzione
+- ✅ **Approvazione strumenti** — approva/nega le richieste di tool execution con i bottoni A/B
+- 🎤 **Invio vocale** — doppio click A per registrare (max 4s), trascritto via **Groq STT** e inviato a Hermes
+- 🔔 **Notifiche visive e sonore** — LED, beep, animazioni, orientamento automatico del display
+- 🐾 **18 animali ASCII** + supporto **GIF characters** via SPIFFS (es. `bufo`)
+- 🔄 **Stati animati** — sleep, idle, busy, attention, celebrate, dizzy, heart
+- 📟 **Orologio** — sincronizzazione NTP, orientamento auto portrait/landscape
+- 🔗 **BLE bridge** — Nordic UART Service per controllo desktop via Bluetooth
+- ⚙️ **Menu impostazioni** — luminosità, suono, LED, informazioni Wi-Fi/Hermes
+
+## 🏗️ Architettura
 
 ```
                   +--------------------------------+
@@ -16,71 +32,139 @@ Unlike the original Bluetooth BLE implementation, this version connects directly
                                   v
                   +---------------+----------------+
                   |     Hermes API Gateway         |
-                  |       (Port 8642)              |
+                  |       (Porta 8642)             |
                   +--------------------------------+
 ```
 
-### Configuration Details
-* **Server Target**: `http://192.168.1.100:8642/v1/runs/current`
-* **Authorization**: `Bearer <YOUR_HERMES_API_KEY>`
-* **Wi-Fi**: Configured directly in the device memory (or NVS preferences).
+### Endpoint API utilizzati
 
-## Controls
+| Endpoint | Metodo | Descrizione |
+|----------|--------|-------------|
+| `/v1/runs/current` | GET | Polling stato run corrente |
+| `/v1/runs/current/approval` | POST | Approva/nega tool execution |
+| `/v1/runs/current/stop` | POST | Ferma run in esecuzione |
+| `/v1/chat/completions` | POST | Invia messaggi vocali/testo |
+| `/api/sessions` | GET | Lista sessioni Hermes |
 
-| Button | Screen Context | Action |
-| --- | --- | --- |
-| **A** (Front) | Normal / Info | Switch to the next screen |
-| **A** (Front) | Approval Prompt | **Approve tool execution** |
-| **B** (Side) | Normal / Info | Switch to the next page |
-| **B** (Side) | Approval Prompt | **Deny tool execution** |
-| **Hold A** | Any | Open Settings Menu |
-| **Power** (Left, short) | Any | Toggle screen backlight on/off |
-| **Power** (Left, long) | Any | Power off device |
-| **Shake** | Normal | Put buddy in "Dizzy" animation state |
-| **Face-down** | Normal | Put buddy in "Nap" (power-saving) state |
+### Pipeline Vocale
 
-## The Seven States
+```
+Microfono M5Stick → Groq STT (whisper-large-v3-turbo) → Hermes Chat → Risposta su display
+```
 
-| State | Trigger | Animation Description |
-| --- | --- | --- |
-| `sleep` | Wi-Fi / Gateway disconnected | Eyes closed, low-power mode |
-| `idle` | Connected, no active run | Robot blinking, looking around |
-| `busy` | Hermes agent run is actively executing | Sweating, running cycles |
-| `attention` | Run is waiting for tool approval | Alert state, LED blinks and buzzer chirps |
-| `celebrate` | Level up (every 50K tokens processed) | Bouncing, celebrate screen |
-| `dizzy` | Device was shaken | Spiral eyes, shaking |
-| `heart` | Prompt approved in under 5 seconds | Floating hearts, happy |
+## 🎮 Controlli
 
-## ASCII Species
-The device retains support for all **18 ASCII species** (including `robot`, `capybara`, `duck`, etc.). You can switch between them through the Settings menu.
+| Input | Contesto | Azione |
+|-------|----------|--------|
+| **A** (frontale) | Normale / Info | Schermata successiva |
+| **A** | Richiesta approvazione | **Approva** tool |
+| **Doppio A** | Normale | **Avvia registrazione vocale** |
+| **A lungo** | Qualsiasi | Apre menu impostazioni |
+| **B** (laterale) | Normale / Info | Pagina successiva |
+| **B** | Richiesta approvazione | **Nega** tool |
+| **Power** (breve) | Qualsiasi | Spegne/accende display |
+| **Power** (lungo) | Qualsiasi | Spegne dispositivo |
+| **Scuotimento** | Normale | Attiva stato "dizzy" |
+| **Face-down** | Normale | Attiva modalità risparmio energetico "nap" |
 
-## GIF Characters
-Custom GIF characters (like `bufo`) can be flashed into the device's SPIFFS filesystem partitions. The buddy will automatically switch to GIF rendering if a valid filesystem character pack is detected.
+## 📟 Stati
 
-## Flashing the Device
+| Stato | Trigger | Descrizione |
+|-------|---------|-------------|
+| `sleep` | Wi-Fi/API disconnesso | Occhi chiusi, low-power |
+| `idle` | Connesso, nessun run attivo | Animazione rilassata (cambia in base all'umore) |
+| `busy` | Run in esecuzione | Sudore, animazioni di lavoro |
+| `attention` | Run in attesa di approvazione | LED lampeggiante + beep |
+| `celebrate` | Level up (50K token) o buon umore | Festa, balzi |
+| `dizzy` | Scuotimento | Occhi a spirale |
+| `heart` | Azione rapida (<5s) o mood alto | Cuoricini volanti |
 
-Install Python and [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/), then compile and upload the firmware via USB:
+### Sistema Pet (Mood & Energia)
 
+- **Livello**: sale ogni 50K token processati
+- **Mood** (0-4 cuori): scala in base al tempo dall'ultimo utilizzo (≤2h = 4 cuori, >48h = 0)
+- **Energia** (0-5): parte da 3 al boot, si ricarica a 5 quando si esce dalla pausa "nap", cala di 1 ogni 2 ore
+- **Fed bar**: progresso verso il prossimo level up
+
+## 🛠️ Requisiti
+
+- **Hardware**: M5StickC Plus 2 (con microfono PDM e speaker integrati)
+- **Software**: [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/) (`pip install platformio`)
+- **Backend**: Hermes Agent con API Server abilitato + **Groq API key** per STT vocale
+
+## 🚀 Setup & Flash
+
+1. Clona il repo:
+   ```bash
+   git clone https://github.com/Syax89/hermes-m5stick-firmware.git
+   cd hermes-m5stick-firmware
+   ```
+
+2. Installa le dipendenze e compila:
+   ```bash
+   pio pkg install
+   pio run --environment m5stickc-plus
+   ```
+
+3. Carica il firmware via USB:
+   ```bash
+   pio run --environment m5stickc-plus -t upload
+   ```
+
+4. Per cancellare NVS e fare un flash pulito:
+   ```bash
+   pio run --environment m5stickc-plus -t erase && pio run -t upload
+   ```
+
+5. Per caricare un character GIF (es. `bufo`) su SPIFFS, usa il **desktop bridge** o:
+   ```bash
+   pio run --environment m5stickc-plus -t uploadfs
+   ```
+
+## 📦 Struttura del Progetto
+
+```
+hermes-m5stick-firmware/
+├── src/
+│   ├── main.cpp               # Loop principale, state machine, UI screens
+│   ├── buddy.cpp/h            # Dispatch e render animali ASCII
+│   ├── buddy_common.h         # Strutture dati comuni ai buddies
+│   ├── buddies/               # 18 animali ASCII (robot, capybara, cat, duck, etc.)
+│   ├── character.cpp/h        # Decodifica e render GIF
+│   ├── data.h                 # Client Wi-Fi, polling API, audio pipeline
+│   ├── stats.h                # Statistiche NVS, settings, livelli, mood
+│   ├── ble_bridge.cpp/h       # Bluetooth LE (Nordic UART Service)
+│   ├── xfer.h                 # Trasferimento character GIF via seriale/BLE
+│   ├── setup_wizard.h         # Configurazione Wi-Fi guidata
+│   ├── M5StickCPlus.cpp/h     # Fix init statico M5 wrapper
+├── characters/                # Pacchetti character GIF (es. bufo)
+│   └── bufo/                  # 13 frame + manifest.json + README.md
+├── scripts/
+│   └── patch_dfr.py           # Auto-patch per compatibilità ESP32 Arduino Core v3+
+├── platformio.ini             # Configurazione PlatformIO
+└── README.md
+```
+
+## 🔧 Risoluzione Problemi
+
+### Compilazione — `analogWriteResolution` error
+Se incontri:
+```
+error: too many arguments to function 'void analogWriteResolution(uint8_t)'
+```
+Lo script `scripts/patch_dfr.py` lo risolve automaticamente. Se non funziona, applica manualmente:
 ```bash
-# Compile and flash via USB
-python3 -m platformio run -t upload
+sed -i 's/analogWriteResolution(_pin0,10);/analogWriteResolution(10);/' \
+  .pio/libdeps/m5stickc-plus/DFRobot_GP8XXX/DFRobot_GP8XXX.cpp
 ```
 
-To erase the NVS cache and perform a clean flash:
-```bash
-python3 -m platformio run -t erase && python3 -m platformio run -t upload
-```
+### Prima accensione
+Il primo avvio mostra il **WiFi Setup Wizard** per configurare SSID, password, IP di Hermes e API key. Usa il BLE bridge o l'app desktop per impostare i parametri.
 
-## Project Layout
+## 🤝 Contributi
 
-```
-src/
-  main.cpp       — loop, state machine, UI screens
-  buddy.cpp      — ASCII species dispatch + render helpers
-  buddies/       — active robot buddy animation helper (robot.cpp)
-  character.cpp  — GIF decode + render
-  data.h         — Wi-Fi client, GET status, POST approval
-  stats.h        — NVS-backed stats, settings, owner choice
-  M5StickCPlus.h/cpp — static init fixes & M5 wrapper
-characters/      — example GIF character packs (e.g. bufo)
-```
+Sentiti libero di aprire issue e PR! Questo è un progetto in evoluzione 🚀
+
+## 📄 Licenza
+
+MIT
