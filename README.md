@@ -1,24 +1,24 @@
-# 🤖 Hermes M5Stick Firmware
+# Hermes M5Stick Firmware
 
-**Firmware per M5StickC Plus 2** — un companion device fisico che si collega via Wi-Fi a **Hermes Agent**, monitora le sessioni, mostra dettagli token, e permette l'invio di comandi vocali.
+Firmware for **M5StickC Plus 2** — a physical companion device that connects to **Hermes Agent** over Wi-Fi, displaying session status, token usage, and allowing voice input via the built-in microphone.
 
-![M5StickC Plus 2](https://img.shields.io/badge/hardware-M5StickC%20Plus%202-1a73e8?style=flat-square)
-![PlatformIO](https://img.shields.io/badge/framework-PlatformIO-ff5a00?style=flat-square)
-![ESP32](https://img.shields.io/badge/soc-ESP32--S3-black?style=flat-square)
+This is a fork of [anthropics/claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy), adapted to work with the Hermes Agent API instead of the original Claude Bluetooth API. The original project is MIT-licensed by Anthropic, PBC.
 
 ---
 
-## ✨ Funzionalità
+## Features
 
-- 📊 **Dashboard in tempo reale** — mostra sessioni correnti, token usati, stato connessione
-- 🎤 **Invio vocale** — doppio click A per registrare (max 4s), trascritto via **Groq STT** e inviato a Hermes
-- 🔔 **Notifiche visive e sonore** — LED, beep, animazioni, orientamento automatico del display
-- 🐾 **18 animali ASCII** + supporto **GIF characters** via SPIFFS (es. `bufo`)
-- 🔄 **Stati animati** — sleep, idle, busy, celebrate, dizzy, heart
-- 📟 **Orologio** — sincronizzazione NTP, orientamento auto portrait/landscape
-- ⚙️ **Menu impostazioni** — luminosità, suono, LED, informazioni Wi-Fi/Hermes
+- **Real-time dashboard** — displays active sessions, token counts, connection status
+- **Voice input** — double-press button A to record (up to 4s), transcribed via **Groq STT** (whisper-large-v3-turbo) and sent to Hermes for response
+- **Session browser** — view and scroll through active Hermes sessions
+- **18 ASCII pets** — switchable companion characters (robot, capybara, cat, duck, etc.)
+- **GIF character support** — upload custom animated characters via SPIFFS (e.g. `bufo`)
+- **Animated states** — sleep, idle, busy, celebrate, dizzy, heart — driven by mood and activity
+- **Pet system** — mood (0-4 hearts) decays with inactivity; energy (0-5) drains over time; levels up every 50K tokens
+- **NTP-synced clock** — auto-orienting portrait/landscape display with RTC
+- **Settings menu** — brightness, sound, LED, Wi-Fi info, Hermes info, clock rotation
 
-## 🏗️ Architettura
+## Architecture
 
 ```
                   +--------------------------------+
@@ -30,135 +30,133 @@
                                   v
                   +---------------+----------------+
                   |     Hermes API Gateway         |
-                  |       (Porta 8642)             |
+                  |       (Port 8642)              |
                   +--------------------------------+
 ```
 
-### Endpoint API utilizzati
+### API Endpoints
 
-| Endpoint | Metodo | Descrizione |
+| Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/v1/runs/current` | GET | Polling stato run corrente |
-| `/v1/runs/current/stop` | POST | Ferma run in esecuzione |
-| `/v1/chat/completions` | POST | Invia messaggi vocali/testo |
-| `/api/sessions` | GET | Lista sessioni Hermes |
+| `/v1/runs/current` | GET | Poll current run status |
+| `/v1/runs/current/stop` | POST | Stop a running Hermes session |
+| `/v1/chat/completions` | POST | Send voice transcriptions for chat |
+| `/api/sessions` | GET | List active Hermes sessions |
 
-### Pipeline Vocale
+### Voice Pipeline
 
 ```
-Microfono M5Stick → Groq STT (whisper-large-v3-turbo) → Hermes Chat → Risposta su display
+M5Stick Mic -> Groq STT (whisper-large-v3-turbo) -> Hermes Chat -> Response on display
 ```
 
-## 🎮 Controlli
+## Controls
 
-| Input | Contesto | Azione |
-|-------|----------|--------|
-| **A** (frontale) | Normale / Info | Schermata successiva |
-| **Doppio A** | Normale | **Avvia registrazione vocale** |
-| **A lungo** | Qualsiasi | Apre menu impostazioni |
-| **B** (laterale) | Normale / Info | Pagina successiva / Indietro |
-| **Power** (breve) | Qualsiasi | Spegne/accende display |
-| **Power** (lungo) | Qualsiasi | Spegne dispositivo |
-| **Scuotimento** | Normale | Attiva stato "dizzy" |
-| **Face-down** | Normale | Attiva modalità risparmio energetico "nap" |
+| Input | Context | Action |
+|-------|---------|--------|
+| **A** (front) | Normal / Info | Next screen |
+| **Double A** | Normal | **Start voice recording** |
+| **Hold A** | Any | Open settings menu |
+| **B** (side) | Normal / Info | Next page / Back |
+| **Power** (short) | Any | Toggle screen on/off |
+| **Power** (long) | Any | Power off device |
+| **Shake** | Normal | Trigger "dizzy" animation |
+| **Face-down** | Normal | Enter power-saving "nap" mode |
 
-## 📟 Stati
+## States
 
-| Stato | Trigger | Descrizione |
+| State | Trigger | Description |
 |-------|---------|-------------|
-| `sleep` | Wi-Fi/API disconnesso | Occhi chiusi, low-power |
-| `idle` | Connesso, nessun run attivo | Animazione rilassata (cambia in base all'umore) |
-| `busy` | Run in esecuzione | Sudore, animazioni di lavoro |
-| `celebrate` | Level up (50K token) o buon umore | Festa, balzi |
-| `dizzy` | Scuotimento | Occhi a spirale |
-| `heart` | Mood alto | Cuoricini volanti |
+| `sleep` | Wi-Fi/API disconnected | Eyes closed, low power |
+| `idle` | Connected, no active run | Relaxed animation (varies by mood) |
+| `busy` | Run in progress | Working animation |
+| `celebrate` | Level up (50K tokens) or high mood | Celebration |
+| `dizzy` | Device shaken | Spiral eyes |
+| `heart` | High mood | Floating hearts |
 
-### Sistema Pet (Mood & Energia)
+## Requirements
 
-- **Livello**: sale ogni 50K token processati
-- **Mood** (0-4 cuori): scala in base al tempo dall'ultimo utilizzo (≤2h = 4 cuori, >48h = 0)
-- **Energia** (0-5): parte da 3 al boot, si ricarica a 5 quando si esce dalla pausa "nap", cala di 1 ogni 2 ore
-- **Fed bar**: progresso verso il prossimo level up
-
-## 🛠️ Requisiti
-
-- **Hardware**: M5StickC Plus 2 (con microfono PDM e speaker integrati)
+- **Hardware**: M5StickC Plus 2 (with PDM microphone and speaker)
 - **Software**: [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/) (`pip install platformio`)
-- **Backend**: Hermes Agent con API Server abilitato + **Groq API key** per STT vocale
+- **Backend**: Hermes Agent with API server enabled + **Groq API key** for voice STT
 
-## 🚀 Setup & Flash
+## Setup & Flashing
 
-1. Clona il repo:
+1. Clone the repo:
    ```bash
    git clone https://github.com/Syax89/hermes-m5stick-firmware.git
    cd hermes-m5stick-firmware
    ```
 
-2. Installa le dipendenze e compila:
+2. Install dependencies and compile:
    ```bash
    pio pkg install
    pio run --environment m5stickc-plus
    ```
 
-3. Carica il firmware via USB:
+3. Upload firmware via USB:
    ```bash
    pio run --environment m5stickc-plus -t upload
    ```
 
-4. Per cancellare NVS e fare un flash pulito:
+4. To erase NVS and do a clean flash:
    ```bash
    pio run --environment m5stickc-plus -t erase && pio run -t upload
    ```
 
-5. Per caricare un character GIF (es. `bufo`) su SPIFFS, usa il **desktop bridge** o:
-   ```bash
-   pio run --environment m5stickc-plus -t uploadfs
-   ```
-
-## 📦 Struttura del Progetto
+## Project Structure
 
 ```
 hermes-m5stick-firmware/
 ├── src/
-│   ├── main.cpp               # Loop principale, state machine, UI screens
-│   ├── buddy.cpp/h            # Dispatch e render animali ASCII
-│   ├── buddy_common.h         # Strutture dati comuni ai buddies
-│   ├── buddies/               # 18 animali ASCII (robot, capybara, cat, duck, etc.)
-│   ├── character.cpp/h        # Decodifica e render GIF
-│   ├── data.h                 # Client Wi-Fi, polling API, audio pipeline
-│   ├── stats.h                # Statistiche NVS, settings, livelli, mood
-│   ├── ble_bridge.cpp/h       # Bluetooth LE (presente ma non utilizzato attualmente)
-│   ├── xfer.h                 # Trasferimento character GIF via seriale
-│   ├── setup_wizard.h         # Configurazione Wi-Fi guidata
-│   ├── M5StickCPlus.cpp/h     # Fix init statico M5 wrapper
-├── characters/                # Pacchetti character GIF (es. bufo)
-│   └── bufo/                  # 13 frame + manifest.json + README.md
+│   ├── main.cpp               # Main loop, state machine, UI screens
+│   ├── buddy.cpp/h            # ASCII pet dispatch and rendering
+│   ├── buddy_common.h         # Shared data structures for buddies
+│   ├── buddies/               # 18 ASCII pet definitions
+│   ├── character.cpp/h        # GIF decode and rendering
+│   ├── data.h                 # Wi-Fi client, API polling, audio pipeline
+│   ├── stats.h                # NVS-backed stats, settings, pet levels
+│   ├── ble_bridge.cpp/h       # Bluetooth LE (present but unused)
+│   ├── xfer.h                 # GIF character transfer over serial
+│   ├── setup_wizard.h         # First-run Wi-Fi configuration wizard
+│   ├── M5StickCPlus.cpp/h     # M5 wrapper static init fixes
+├── characters/                # GIF character packs (e.g. bufo)
+│   └── bufo/                  # 13 frames + manifest.json + README.md
 ├── scripts/
-│   └── patch_dfr.py           # Auto-patch per compatibilità ESP32 Arduino Core v3+
-├── platformio.ini             # Configurazione PlatformIO
+│   └── patch_dfr.py           # Auto-patch for ESP32 Arduino Core v3+ compat
+├── platformio.ini             # PlatformIO configuration
+├── LICENSE                    # MIT License (see below)
+├── CONTRIBUTING.md            # Contribution guidelines (upstream)
 └── README.md
 ```
 
-## 🔧 Risoluzione Problemi
+## Troubleshooting
 
-### Compilazione — `analogWriteResolution` error
-Se incontri:
+### Compilation — `analogWriteResolution` error
+
+If you encounter:
 ```
 error: too many arguments to function 'void analogWriteResolution(uint8_t)'
 ```
-Lo script `scripts/patch_dfr.py` lo risolve automaticamente. Se non funziona, applica manualmente:
+The `scripts/patch_dfr.py` script auto-fixes this during build. If it fails, apply manually:
 ```bash
 sed -i 's/analogWriteResolution(_pin0,10);/analogWriteResolution(10);/' \
   .pio/libdeps/m5stickc-plus/DFRobot_GP8XXX/DFRobot_GP8XXX.cpp
 ```
 
-### Prima accensione
-Il primo avvio mostra il **WiFi Setup Wizard** per configurare SSID, password, IP di Hermes e API key. La configurazione avviene tramite seriale USB.
+### First Boot
 
-## 🤝 Contributi
+The device will show a **Wi-Fi Setup Wizard** prompting for SSID, password, Hermes IP, and API key. Configuration is done over USB serial.
 
-Sentiti libero di aprire issue e PR! Questo è un progetto in evoluzione 🚀
+## Upstream
 
-## 📄 Licenza
+This project is a fork of [anthropics/claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy) (MIT licensed). Key differences from upstream:
 
-MIT
+- Replaced Claude BLE API with Hermes Agent HTTP API
+- Added voice recording pipeline (Groq STT -> Hermes Chat)
+- Added session browser, NTP sync, settings menu
+- Custom pet mood/energy system
+- Various UI improvements and M5StickC Plus 2 compatibility fixes
+
+## License
+
+MIT — see [LICENSE](LICENSE). The GIF assets in `characters/bufo/` are third-party artwork and remain under their original license.
