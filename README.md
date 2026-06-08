@@ -1,6 +1,6 @@
 # 🤖 Hermes M5Stick Firmware
 
-**Firmware per M5StickC Plus 2** — un companion device fisico che si collega via Wi-Fi a **Hermes Agent**, monitora le sessioni, gestisce le richieste di approvazione, e permette l'invio di comandi vocali.
+**Firmware per M5StickC Plus 2** — un companion device fisico che si collega via Wi-Fi a **Hermes Agent**, monitora le sessioni, mostra dettagli token, e permette l'invio di comandi vocali.
 
 ![M5StickC Plus 2](https://img.shields.io/badge/hardware-M5StickC%20Plus%202-1a73e8?style=flat-square)
 ![PlatformIO](https://img.shields.io/badge/framework-PlatformIO-ff5a00?style=flat-square)
@@ -10,14 +10,12 @@
 
 ## ✨ Funzionalità
 
-- 📊 **Dashboard in tempo reale** — mostra sessioni correnti, token usati, stato esecuzione
-- ✅ **Approvazione strumenti** — approva/nega le richieste di tool execution con i bottoni A/B
+- 📊 **Dashboard in tempo reale** — mostra sessioni correnti, token usati, stato connessione
 - 🎤 **Invio vocale** — doppio click A per registrare (max 4s), trascritto via **Groq STT** e inviato a Hermes
 - 🔔 **Notifiche visive e sonore** — LED, beep, animazioni, orientamento automatico del display
 - 🐾 **18 animali ASCII** + supporto **GIF characters** via SPIFFS (es. `bufo`)
-- 🔄 **Stati animati** — sleep, idle, busy, attention, celebrate, dizzy, heart
+- 🔄 **Stati animati** — sleep, idle, busy, celebrate, dizzy, heart
 - 📟 **Orologio** — sincronizzazione NTP, orientamento auto portrait/landscape
-- 🔗 **BLE bridge** — Nordic UART Service per controllo desktop via Bluetooth
 - ⚙️ **Menu impostazioni** — luminosità, suono, LED, informazioni Wi-Fi/Hermes
 
 ## 🏗️ Architettura
@@ -41,7 +39,6 @@
 | Endpoint | Metodo | Descrizione |
 |----------|--------|-------------|
 | `/v1/runs/current` | GET | Polling stato run corrente |
-| `/v1/runs/current/approval` | POST | Approva/nega tool execution |
 | `/v1/runs/current/stop` | POST | Ferma run in esecuzione |
 | `/v1/chat/completions` | POST | Invia messaggi vocali/testo |
 | `/api/sessions` | GET | Lista sessioni Hermes |
@@ -57,11 +54,9 @@ Microfono M5Stick → Groq STT (whisper-large-v3-turbo) → Hermes Chat → Risp
 | Input | Contesto | Azione |
 |-------|----------|--------|
 | **A** (frontale) | Normale / Info | Schermata successiva |
-| **A** | Richiesta approvazione | **Approva** tool |
 | **Doppio A** | Normale | **Avvia registrazione vocale** |
 | **A lungo** | Qualsiasi | Apre menu impostazioni |
-| **B** (laterale) | Normale / Info | Pagina successiva |
-| **B** | Richiesta approvazione | **Nega** tool |
+| **B** (laterale) | Normale / Info | Pagina successiva / Indietro |
 | **Power** (breve) | Qualsiasi | Spegne/accende display |
 | **Power** (lungo) | Qualsiasi | Spegne dispositivo |
 | **Scuotimento** | Normale | Attiva stato "dizzy" |
@@ -74,10 +69,9 @@ Microfono M5Stick → Groq STT (whisper-large-v3-turbo) → Hermes Chat → Risp
 | `sleep` | Wi-Fi/API disconnesso | Occhi chiusi, low-power |
 | `idle` | Connesso, nessun run attivo | Animazione rilassata (cambia in base all'umore) |
 | `busy` | Run in esecuzione | Sudore, animazioni di lavoro |
-| `attention` | Run in attesa di approvazione | LED lampeggiante + beep |
 | `celebrate` | Level up (50K token) o buon umore | Festa, balzi |
 | `dizzy` | Scuotimento | Occhi a spirale |
-| `heart` | Azione rapida (<5s) o mood alto | Cuoricini volanti |
+| `heart` | Mood alto | Cuoricini volanti |
 
 ### Sistema Pet (Mood & Energia)
 
@@ -133,8 +127,8 @@ hermes-m5stick-firmware/
 │   ├── character.cpp/h        # Decodifica e render GIF
 │   ├── data.h                 # Client Wi-Fi, polling API, audio pipeline
 │   ├── stats.h                # Statistiche NVS, settings, livelli, mood
-│   ├── ble_bridge.cpp/h       # Bluetooth LE (Nordic UART Service)
-│   ├── xfer.h                 # Trasferimento character GIF via seriale/BLE
+│   ├── ble_bridge.cpp/h       # Bluetooth LE (presente ma non utilizzato attualmente)
+│   ├── xfer.h                 # Trasferimento character GIF via seriale
 │   ├── setup_wizard.h         # Configurazione Wi-Fi guidata
 │   ├── M5StickCPlus.cpp/h     # Fix init statico M5 wrapper
 ├── characters/                # Pacchetti character GIF (es. bufo)
@@ -159,7 +153,7 @@ sed -i 's/analogWriteResolution(_pin0,10);/analogWriteResolution(10);/' \
 ```
 
 ### Prima accensione
-Il primo avvio mostra il **WiFi Setup Wizard** per configurare SSID, password, IP di Hermes e API key. Usa il BLE bridge o l'app desktop per impostare i parametri.
+Il primo avvio mostra il **WiFi Setup Wizard** per configurare SSID, password, IP di Hermes e API key. La configurazione avviene tramite seriale USB.
 
 ## 🤝 Contributi
 
