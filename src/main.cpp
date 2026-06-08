@@ -2,10 +2,27 @@
 #include <LittleFS.h>
 #include <cmath>
 #include <stdarg.h>
+#include <esp_system.h>
 #include "ble_bridge.h"
 #include "data.h"
 #include "buddy.h"
 #include "setup_wizard.h"
+
+const char* resetReasonStr() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT_PIN";
+    case ESP_RST_SW:        return "SW_RESET";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_DEEPSLEEP: return "SLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "UNKNOWN";
+  }
+}
 
 TFT_eSprite spr = TFT_eSprite(&M5.Lcd);
 // Landscape double-buffer for the busy/clock panels. Direct-to-LCD drawing in
@@ -1113,6 +1130,8 @@ void drawInfo() {
     snprintf(buf, sizeof(buf), "%u/4", brightLevel);
     drawDeviceRow("Screen:", buf);
     
+    drawDeviceRow("Reset:", resetReasonStr());
+    
     spr.setTextColor(p.textDim, p.bg);
     spr.setCursor(12, rowY);
     spr.print("Hermes:");
@@ -2059,6 +2078,7 @@ void setup() {
   tamaMutex = xSemaphoreCreateMutex();
   voiceMutex = xSemaphoreCreateMutex();
   M5.begin();
+  Serial.printf("Reset Reason: %s\n", resetReasonStr());
   Serial.printf("PSRAM: size=%u free=%u\n", ESP.getPsramSize(), ESP.getFreePsram());
   Serial.printf("DRAM: size=%u free=%u max=%u\n", ESP.getHeapSize(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   M5.Lcd.setRotation(0);
