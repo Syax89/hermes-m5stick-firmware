@@ -1,6 +1,10 @@
 #pragma once
 #include <Arduino.h>
 #include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <time.h>
+extern SemaphoreHandle_t nvsMutex;
 
 // Header-only with file-static state: include from exactly one translation
 // unit (main.cpp). Including from a second .cpp produces duplicate symbols.
@@ -20,61 +24,147 @@ struct Stats {
   uint8_t  velCount;
   uint8_t  level;
   uint32_t tokens;          // cumulative output tokens, drives level
+  uint8_t  decisions[8];     // rolling decisions buffer (1 = approval, 0 = denial)
+  uint8_t  decIdx;
+  uint8_t  decCount;
+  uint32_t lastUseSec;
+  uint32_t lastUseMs;
 };
 
-static Stats _stats;
-static Preferences _prefs;
-static bool _dirty = false;
+inline Stats _stats;
+inline Preferences _prefs;
+inline bool _dirty = false;
+inline uint32_t _lastNapEndSec = 0;
+inline uint8_t  _energyAtNap  = 3;
+inline uint32_t _lastUseSec    = 0;
+inline uint32_t _lastUseMs     = 0;
+
+inline SemaphoreHandle_t statsMutex = NULL;
 
 inline void statsLoad() {
-  _prefs.begin("buddy", true);
-  _stats.napSeconds = _prefs.getUInt("nap", 0);
-  _stats.approvals  = _prefs.getUShort("appr", 0);
-  _stats.denials    = _prefs.getUShort("deny", 0);
-  _stats.velIdx     = _prefs.getUChar("vidx", 0);
-  _stats.velCount   = _prefs.getUChar("vcnt", 0);
-  _stats.level      = _prefs.getUChar("lvl", 0);
-  _stats.tokens     = _prefs.getUInt("tok", 0);
-  size_t got = _prefs.getBytes("vel", _stats.velocity, sizeof(_stats.velocity));
-  if (got != sizeof(_stats.velocity)) memset(_stats.velocity, 0, sizeof(_stats.velocity));
-  _prefs.end();
-  // Level is derived from tokens; if NVS has level set but tokens at 0,
-  // backfill so the derivation holds.
-  if (_stats.tokens == 0 && _stats.level > 0) {
-    _stats.tokens = (uint32_t)_stats.level * TOKENS_PER_LEVEL;
+  if (!statsMutex) {
+    statsMutex = xSemaphoreCreateMutex();
+  }
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+      _prefs.begin("buddy", true);
+      _stats.napSeconds = _prefs.getUInt("nap", 0);
+      _stats.approvals  = _prefs.getUShort("appr", 0);
+      _stats.denials    = _prefs.getUShort("deny", 0);
+      _stats.velIdx     = _prefs.getUChar("vidx", 0);
+      _stats.velCount   = _prefs.getUChar("vcnt", 0);
+      _stats.level      = _prefs.getUChar("lvl", 0);
+      _stats.tokens     = _prefs.getUInt("tok", 0);
+      size_t got = _prefs.getBytes("vel", _stats.velocity, sizeof(_stats.velocity));
+      if (got != sizeof(_stats.velocity)) memset(_stats.velocity, 0, sizeof(_stats.velocity));
+      
+      size_t gotDec = _prefs.getBytes("dec", _stats.decisions, sizeof(_stats.decisions));
+      if (gotDec != sizeof(_stats.decisions)) {
+        memset(_stats.decisions, 1, sizeof(_stats.decisions)); // default to approvals (1)
+      }
+      _stats.decIdx     = _prefs.getUChar("didx", 0);
+      _stats.decCount   = _prefs.getUChar("dcnt", 0);
+      _lastNapEndSec    = _prefs.getUInt("nend", 0);
+      _energyAtNap      = _prefs.getUChar("enap", 3);
+      _lastUseSec       = _prefs.getUInt("luse", 0);
+      _prefs.end();
+      xSemaphoreGive(nvsMutex);
+    }
+    
+    _lastUseMs = millis();
+    
+    // Initialize _lastNapEndSec if not found in NVS
+    if (_lastNapEndSec == 0) {
+      uint32_t nowSec = time(nullptr);
+      _lastNapEndSec = (nowSec > 1700000000) ? nowSec : 1700000000;
+    }
+    
+    // Initialize _lastUseSec if not found in NVS
+    if (_lastUseSec == 0) {
+      uint32_t nowSec = time(nullptr);
+      _lastUseSec = (nowSec > 1700000000) ? nowSec : 1700000000;
+    }
+    
+    // Level is derived from tokens; if NVS has level set but tokens at 0,
+    // backfill so the derivation holds.
+    if (_stats.tokens == 0 && _stats.level > 0) {
+      _stats.tokens = (uint32_t)_stats.level * TOKENS_PER_LEVEL;
+    }
+    xSemaphoreGive(statsMutex);
   }
 }
 
 inline void statsSave() {
   if (!_dirty) return;
-  _prefs.begin("buddy", false);
-  _prefs.putUInt("nap", _stats.napSeconds);
-  _prefs.putUShort("appr", _stats.approvals);
-  _prefs.putUShort("deny", _stats.denials);
-  _prefs.putUChar("vidx", _stats.velIdx);
-  _prefs.putUChar("vcnt", _stats.velCount);
-  _prefs.putUChar("lvl", _stats.level);
-  _prefs.putUInt("tok", _stats.tokens);
-  _prefs.putBytes("vel", _stats.velocity, sizeof(_stats.velocity));
-  _prefs.end();
-  _dirty = false;
+  Stats tempStats;
+  uint32_t tempLastNapEndSec = 0;
+  uint8_t tempEnergyAtNap = 3;
+  uint32_t tempLastUseSec = 0;
+  bool dirtyCopy = false;
+  
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    tempStats = _stats;
+    tempLastNapEndSec = _lastNapEndSec;
+    tempEnergyAtNap = _energyAtNap;
+    tempLastUseSec = _lastUseSec;
+    dirtyCopy = _dirty;
+    _dirty = false;
+    xSemaphoreGive(statsMutex);
+  }
+  
+  if (!dirtyCopy) return;
+
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", false);
+    _prefs.putUInt("nap", tempStats.napSeconds);
+    _prefs.putUShort("appr", tempStats.approvals);
+    _prefs.putUShort("deny", tempStats.denials);
+    _prefs.putUChar("vidx", tempStats.velIdx);
+    _prefs.putUChar("vcnt", tempStats.velCount);
+    _prefs.putUChar("lvl", tempStats.level);
+    _prefs.putUInt("tok", tempStats.tokens);
+    _prefs.putBytes("vel", tempStats.velocity, sizeof(tempStats.velocity));
+    _prefs.putBytes("dec", tempStats.decisions, sizeof(tempStats.decisions));
+    _prefs.putUChar("didx", tempStats.decIdx);
+    _prefs.putUChar("dcnt", tempStats.decCount);
+    _prefs.putUInt("nend", tempLastNapEndSec);
+    _prefs.putUChar("enap", tempEnergyAtNap);
+    _prefs.putUInt("luse", tempLastUseSec);
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
 }
 
 // Level is token-driven now; approvals only feed mood/velocity.
 inline void statsOnApproval(uint32_t secondsToRespond) {
-  _stats.approvals++;
-  _stats.velocity[_stats.velIdx] = (uint16_t)min(secondsToRespond, 65535u);
-  _stats.velIdx = (_stats.velIdx + 1) % 8;
-  if (_stats.velCount < 8) _stats.velCount++;
-  _dirty = true; statsSave();
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    _stats.approvals++;
+    _stats.velocity[_stats.velIdx] = (uint16_t)min(secondsToRespond, 65535u);
+    _stats.velIdx = (_stats.velIdx + 1) % 8;
+    if (_stats.velCount < 8) _stats.velCount++;
+    
+    // Add to rolling decisions buffer (1 = approval)
+    _stats.decisions[_stats.decIdx] = 1;
+    _stats.decIdx = (_stats.decIdx + 1) % 8;
+    if (_stats.decCount < 8) _stats.decCount++;
+    
+    // Update last usage timestamp
+    uint32_t nowSec = time(nullptr);
+    _lastUseSec = (nowSec > 1700000000) ? nowSec : 1700000000;
+    _lastUseMs = millis();
+    
+    _dirty = true;
+    xSemaphoreGive(statsMutex);
+  }
+  statsSave();
 }
 
 // Tokens feed the pet. 50K per level, 5K per pip on the fed bar.
 // Bridge sends cumulative since its start; we add the delta. A drop means
 // the bridge restarted — resync without adding, don't lose NVS progress.
-static uint32_t _lastBridgeTokens = 0;
-static bool _tokensSynced = false;       // first-sight latch — see below
-static bool _levelUpPending = false;
+inline uint32_t _lastBridgeTokens = 0;
+inline bool _tokensSynced = false;       // first-sight latch — see below
+inline bool _levelUpPending = false;
 
 inline void statsOnBridgeTokens(uint32_t bridgeTotal) {
   // The bridge sends its cumulative total since IT started. We track deltas.
@@ -94,41 +184,107 @@ inline void statsOnBridgeTokens(uint32_t bridgeTotal) {
   _lastBridgeTokens = bridgeTotal;
   if (delta == 0) return;
 
-  uint8_t lvlBefore = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
-  _stats.tokens += delta;
-  uint8_t lvlAfter = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
+  bool triggerSave = false;
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    uint8_t lvlBefore = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
+    _stats.tokens += delta;
+    uint8_t lvlAfter = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
+    
+    // Update last usage timestamp since tokens flowed (active usage)
+    uint32_t nowSec = time(nullptr);
+    _lastUseSec = (nowSec > 1700000000) ? nowSec : 1700000000;
+    _lastUseMs = millis();
+    
+    _dirty = true; // Always set dirty so token increments will be saved during idle times
 
-  // Heartbeats are timer-driven telemetry — don't wear NVS on every delta.
-  // Tokens accumulate in RAM, persist only on the milestone. Worst case on
-  // hard power-off: lose up to 50K tokens of progress.
-  if (lvlAfter > lvlBefore) {
-    _stats.level = lvlAfter;
-    _levelUpPending = true;
-    _dirty = true; statsSave();
+    // Heartbeats are timer-driven telemetry — don't wear NVS on every delta.
+    // Tokens accumulate in RAM, persist only on the milestone. Worst case on
+    // hard power-off: lose up to 50K tokens of progress.
+    if (lvlAfter > lvlBefore) {
+      _stats.level = lvlAfter;
+      _levelUpPending = true;
+      triggerSave = true;
+    }
+    xSemaphoreGive(statsMutex);
+  }
+  if (triggerSave) {
+    statsSave();
   }
 }
 
 inline bool statsPollLevelUp() {
-  bool r = _levelUpPending;
-  _levelUpPending = false;
+  bool r = false;
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    r = _levelUpPending;
+    _levelUpPending = false;
+    xSemaphoreGive(statsMutex);
+  }
   return r;
 }
 
-inline void statsOnDenial() { _stats.denials++; _dirty = true; statsSave(); }
+inline void statsEnsureTokens(uint32_t minTokens) {
+  bool triggerSave = false;
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    if (minTokens > _stats.tokens) {
+      _stats.tokens = minTokens;
+      _stats.level = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
+      
+      // Update last usage timestamp (since tokens increased)
+      uint32_t nowSec = time(nullptr);
+      _lastUseSec = (nowSec > 1700000000) ? nowSec : 1700000000;
+      _lastUseMs = millis();
+      
+      _dirty = true;
+      triggerSave = true;
+    }
+    xSemaphoreGive(statsMutex);
+  }
+  if (triggerSave) {
+    statsSave();
+  }
+}
 
-inline void statsMarkDirty() { _dirty = true; }
+inline void statsOnDenial() {
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    _stats.denials++;
+    
+    // Add to rolling decisions buffer (0 = denial)
+    _stats.decisions[_stats.decIdx] = 0;
+    _stats.decIdx = (_stats.decIdx + 1) % 8;
+    if (_stats.decCount < 8) _stats.decCount++;
+    
+    // Update last usage timestamp
+    uint32_t nowSec = time(nullptr);
+    _lastUseSec = (nowSec > 1700000000) ? nowSec : 1700000000;
+    _lastUseMs = millis();
+    
+    _dirty = true;
+    xSemaphoreGive(statsMutex);
+  }
+  statsSave();
+}
 
 inline void statsOnNapEnd(uint32_t seconds) {
-  _stats.napSeconds += seconds;
-  _dirty = true; statsSave();
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    _stats.napSeconds += seconds;
+    _dirty = true;
+    xSemaphoreGive(statsMutex);
+  }
+  statsSave();
 }
 
 // Median of the velocity ring buffer. 0 if empty.
 inline uint16_t statsMedianVelocity() {
-  if (_stats.velCount == 0) return 0;
   uint16_t tmp[8];
-  memcpy(tmp, _stats.velocity, sizeof(tmp));
-  uint8_t n = _stats.velCount;
+  uint8_t n = 0;
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    n = _stats.velCount;
+    if (n > 0) {
+      memcpy(tmp, _stats.velocity, sizeof(tmp));
+    }
+    xSemaphoreGive(statsMutex);
+  }
+  if (n == 0) return 0;
   // insertion sort, n ≤ 8
   for (uint8_t i = 1; i < n; i++) {
     uint16_t k = tmp[i]; int8_t j = i - 1;
@@ -138,86 +294,171 @@ inline uint16_t statsMedianVelocity() {
   return tmp[n/2];
 }
 
-// 0..4 tier. Velocity sets the base; heavy denial ratio drags it down.
+// 0..4 tier. Decays based on time elapsed since last Hermes usage.
 inline uint8_t statsMoodTier() {
-  uint16_t vel = statsMedianVelocity();
-  int8_t tier;
-  if (vel == 0) tier = 2;              // no data: neutral
-  else if (vel < 15) tier = 4;
-  else if (vel < 30) tier = 3;
-  else if (vel < 60) tier = 2;
-  else if (vel < 120) tier = 1;
-  else tier = 0;
-  uint16_t a = _stats.approvals, d = _stats.denials;
-  if (a + d >= 3) {                    // need a few decisions before judging
-    if (d > a) tier -= 2;
-    else if (d * 2 > a) tier -= 1;     // deny rate > 33%
+  uint32_t elapsedSec = 0;
+  
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    uint32_t nowSec = time(nullptr);
+    if (nowSec > 1700000000 && _lastUseSec > 1700000000) {
+      if (nowSec >= _lastUseSec) {
+        elapsedSec = nowSec - _lastUseSec;
+      } else {
+        elapsedSec = 0;
+      }
+    } else {
+      elapsedSec = (millis() - _lastUseMs) / 1000;
+    }
+    xSemaphoreGive(statsMutex);
   }
-  if (tier < 0) tier = 0;
-  return (uint8_t)tier;
+  
+  // Tiers based on elapsed inactivity:
+  // <= 2 ore (7200s) -> 4 cuori
+  // <= 8 ore (28800s) -> 3 cuori
+  // <= 24 ore (86400s) -> 2 cuori
+  // <= 48 ore (172800s) -> 1 cuore
+  // > 48 ore -> 0 cuori
+  if (elapsedSec <= 7200) return 4;
+  if (elapsedSec <= 28800) return 3;
+  if (elapsedSec <= 86400) return 2;
+  if (elapsedSec <= 172800) return 1;
+  return 0;
 }
 
 // Energy: starts at 3/5 on boot, tops up to full on nap end, drains 1 tier per 2h.
-static uint32_t _lastNapEndMs = 0;
-static uint8_t  _energyAtNap  = 3;
 
-inline void statsOnWake() { _lastNapEndMs = millis(); _energyAtNap = 5; }
+inline void statsOnWake() {
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    uint32_t nowSec = time(nullptr);
+    _lastNapEndSec = (nowSec > 1700000000) ? nowSec : 1700000000;
+    _energyAtNap = 5;
+    _dirty = true;
+    xSemaphoreGive(statsMutex);
+  }
+  statsSave();
+}
+
+inline void statsOnNtpSync(uint32_t nowSec) {
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    if (_lastUseSec == 1700000000) {
+      _lastUseSec = nowSec;
+      _dirty = true;
+    }
+    if (_lastNapEndSec == 1700000000) {
+      _lastNapEndSec = nowSec;
+      _dirty = true;
+    }
+    xSemaphoreGive(statsMutex);
+  }
+  statsSave();
+}
 
 inline uint8_t statsEnergyTier() {
-  uint32_t hoursSince = (millis() - _lastNapEndMs) / 3600000;
-  int8_t e = (int8_t)_energyAtNap - (int8_t)(hoursSince / 2);
+  uint32_t hoursSince = 0;
+  int8_t e = 3;
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    uint32_t nowSec = time(nullptr);
+    if (nowSec > 1700000000 && _lastNapEndSec > 1700000000) {
+      if (nowSec >= _lastNapEndSec) {
+        hoursSince = (nowSec - _lastNapEndSec) / 3600;
+      } else {
+        hoursSince = 0;
+      }
+      e = (int8_t)_energyAtNap - (int8_t)(hoursSince / 2);
+    } else {
+      hoursSince = millis() / 3600000;
+      e = (int8_t)_energyAtNap - (int8_t)(hoursSince / 2);
+    }
+    xSemaphoreGive(statsMutex);
+  }
   if (e < 0) e = 0; if (e > 5) e = 5;
   return (uint8_t)e;
 }
 
 inline uint8_t statsFedProgress() {
-  return (uint8_t)((_stats.tokens % TOKENS_PER_LEVEL) / (TOKENS_PER_LEVEL / 10));
+  uint32_t tokens = 0;
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    tokens = _stats.tokens;
+    xSemaphoreGive(statsMutex);
+  }
+  return (uint8_t)((tokens % TOKENS_PER_LEVEL) / (TOKENS_PER_LEVEL / 10));
+}
+
+inline void statsGetSnapshot(Stats* out) {
+  if (statsMutex && xSemaphoreTake(statsMutex, portMAX_DELAY) == pdTRUE) {
+    *out = _stats;
+    out->lastUseSec = _lastUseSec;
+    out->lastUseMs = _lastUseMs;
+    xSemaphoreGive(statsMutex);
+  }
 }
 
 // --- Settings --------------------------------------------------------------
 
 struct Settings {
   bool sound;
-  bool bt;
-  bool wifi;     // placeholder — no WiFi stack linked yet, just stores the pref
   bool led;
-  bool hud;
   uint8_t clockRot;  // 0=auto 1=portrait 2=landscape
+  char hermesIp[64];
+  uint16_t hermesPort;
+  char wifiSsid[33];
+  char wifiPass[64];
+  char groqKey[128];
+  char hermesKey[64];
+  bool configured;
 };
 
-static Settings _settings = { true, true, false, true, true, 0 };
+static Settings _settings = { true, true, 0, "192.168.1.100", 8642, "", "", "", "", false };
 
 inline void settingsLoad() {
-  _prefs.begin("buddy", true);
-  _settings.sound = _prefs.getBool("s_snd", true);
-  _settings.bt    = _prefs.getBool("s_bt",  true);
-  _settings.wifi  = _prefs.getBool("s_wifi",false);
-  _settings.led   = _prefs.getBool("s_led", true);
-  _settings.hud      = _prefs.getBool("s_hud", true);
-  _settings.clockRot = _prefs.getUChar("s_crot", 0);
-  if (_settings.clockRot > 2) _settings.clockRot = 0;
-  _prefs.end();
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", true);
+    _settings.sound = _prefs.getBool("s_snd", true);
+    _settings.led   = _prefs.getBool("s_led", true);
+    _settings.clockRot = _prefs.getUChar("s_crot", 0);
+    if (_settings.clockRot > 2) _settings.clockRot = 0;
+    _prefs.getString("s_ip", _settings.hermesIp, sizeof(_settings.hermesIp));
+    if (_settings.hermesIp[0] == '\0') strcpy(_settings.hermesIp, "192.168.1.100");
+    _settings.hermesPort = _prefs.getUShort("s_port", 8642);
+    _prefs.getString("s_ssid", _settings.wifiSsid, sizeof(_settings.wifiSsid));
+    _prefs.getString("s_pass", _settings.wifiPass, sizeof(_settings.wifiPass));
+    _prefs.getString("s_groq", _settings.groqKey, sizeof(_settings.groqKey));
+    _prefs.getString("s_hkey", _settings.hermesKey, sizeof(_settings.hermesKey));
+    _settings.configured = _prefs.getBool("s_cfg", false);
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
 }
 
 inline void settingsSave() {
-  _prefs.begin("buddy", false);
-  _prefs.putBool("s_snd", _settings.sound);
-  _prefs.putBool("s_bt",  _settings.bt);
-  _prefs.putBool("s_wifi",_settings.wifi);
-  _prefs.putBool("s_led", _settings.led);
-  _prefs.putBool("s_hud", _settings.hud);
-  _prefs.putUChar("s_crot", _settings.clockRot);
-  _prefs.end();
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", false);
+    _prefs.putBool("s_snd", _settings.sound);
+    _prefs.putBool("s_led", _settings.led);
+    _prefs.putUChar("s_crot", _settings.clockRot);
+    _prefs.putString("s_ip", _settings.hermesIp);
+    _prefs.putUShort("s_port", _settings.hermesPort);
+    _prefs.putString("s_ssid", _settings.wifiSsid);
+    _prefs.putString("s_pass", _settings.wifiPass);
+    _prefs.putString("s_groq", _settings.groqKey);
+    _prefs.putString("s_hkey", _settings.hermesKey);
+    _prefs.putBool("s_cfg", _settings.configured);
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
 }
 
-static char _petName[24] = "Buddy";
-static char _ownerName[32] = "";
+inline char _petName[24] = "Buddy";
+inline char _ownerName[32] = "";
 
 inline void petNameLoad() {
-  _prefs.begin("buddy", true);
-  _prefs.getString("petname", _petName, sizeof(_petName));
-  _prefs.getString("owner", _ownerName, sizeof(_ownerName));
-  _prefs.end();
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", true);
+    _prefs.getString("petname", _petName, sizeof(_petName));
+    _prefs.getString("owner", _ownerName, sizeof(_ownerName));
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
 }
 
 // Strip JSON-breaking chars — these names go into a printf'd JSON string
@@ -234,33 +475,46 @@ static void _safeCopy(char* dst, size_t dstLen, const char* src) {
 
 inline void petNameSet(const char* name) {
   _safeCopy(_petName, sizeof(_petName), name);
-  _prefs.begin("buddy", false);
-  _prefs.putString("petname", _petName);
-  _prefs.end();
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", false);
+    _prefs.putString("petname", _petName);
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
 }
 
 inline const char* petName() { return _petName; }
 
 inline void ownerSet(const char* name) {
   _safeCopy(_ownerName, sizeof(_ownerName), name);
-  _prefs.begin("buddy", false);
-  _prefs.putString("owner", _ownerName);
-  _prefs.end();
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", false);
+    _prefs.putString("owner", _ownerName);
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
 }
 
 inline const char* ownerName() { return _ownerName; }
 
 inline uint8_t speciesIdxLoad() {
-  _prefs.begin("buddy", true);
-  uint8_t v = _prefs.getUChar("species", 0xFF);
-  _prefs.end();
+  uint8_t v = 0xFF;
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", true);
+    v = _prefs.getUChar("species", 0xFF);
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
   return v;
 }
 
 inline void speciesIdxSave(uint8_t idx) {
-  _prefs.begin("buddy", false);
-  _prefs.putUChar("species", idx);
-  _prefs.end();
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    _prefs.begin("buddy", false);
+    _prefs.putUChar("species", idx);
+    _prefs.end();
+    xSemaphoreGive(nvsMutex);
+  }
 }
 
 inline Settings& settings() { return _settings; }

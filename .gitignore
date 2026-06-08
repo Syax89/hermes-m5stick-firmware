@@ -2,3 +2,5 @@
 .vscode/
 .DS_Store
 data/
+screenlog.*
+HANDOVER.md

@@ -1,9 +1,37 @@
 #include "buddy.h"
 #include "buddy_common.h"
 #include <M5StickCPlus.h>
+#include <Preferences.h>
 #include <string.h>
 
 extern TFT_eSprite spr;
+
+// ──────────────── local NVS helpers ────────────────
+// Separate from stats.h to avoid duplicate static state across TUs.
+
+extern SemaphoreHandle_t nvsMutex;
+
+static uint8_t _speciesIdxLoad() {
+  uint8_t v = 0xFF;
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    Preferences p;
+    p.begin("buddy", true);
+    v = p.getUChar("species", 0xFF);
+    p.end();
+    xSemaphoreGive(nvsMutex);
+  }
+  return v;
+}
+
+static void _speciesIdxSave(uint8_t idx) {
+  if (nvsMutex && xSemaphoreTake(nvsMutex, portMAX_DELAY) == pdTRUE) {
+    Preferences p;
+    p.begin("buddy", false);
+    p.putUChar("species", idx);
+    p.end();
+    xSemaphoreGive(nvsMutex);
+  }
+}
 
 // Mirrors PersonaState in main.cpp
 enum { B_SLEEP, B_IDLE, B_BUSY, B_ATTENTION, B_CELEBRATE, B_DIZZY, B_HEART };
@@ -69,31 +97,44 @@ void buddySetColor(uint16_t fg)   { _tgt->setTextColor(fg, BUDDY_BG); }
 void buddyPrint(const char* s)    { _tgt->setTextSize(_scale); _tgt->print(s); }
 
 // ──────────────── species registry ────────────────
-extern const Species CAPYBARA_SPECIES;
-extern const Species DUCK_SPECIES;
-extern const Species GOOSE_SPECIES;
+extern const Species AXOLOTL_SPECIES;
 extern const Species BLOB_SPECIES;
+extern const Species CACTUS_SPECIES;
+extern const Species CAPYBARA_SPECIES;
 extern const Species CAT_SPECIES;
+extern const Species CHONK_SPECIES;
 extern const Species DRAGON_SPECIES;
+extern const Species DUCK_SPECIES;
+extern const Species GHOST_SPECIES;
+extern const Species GOOSE_SPECIES;
+extern const Species MUSHROOM_SPECIES;
 extern const Species OCTOPUS_SPECIES;
 extern const Species OWL_SPECIES;
 extern const Species PENGUIN_SPECIES;
-extern const Species TURTLE_SPECIES;
-extern const Species SNAIL_SPECIES;
-extern const Species GHOST_SPECIES;
-extern const Species AXOLOTL_SPECIES;
-extern const Species CACTUS_SPECIES;
-extern const Species ROBOT_SPECIES;
 extern const Species RABBIT_SPECIES;
-extern const Species MUSHROOM_SPECIES;
-extern const Species CHONK_SPECIES;
+extern const Species ROBOT_SPECIES;
+extern const Species SNAIL_SPECIES;
+extern const Species TURTLE_SPECIES;
 
 static const Species* SPECIES_TABLE[] = {
-  &CAPYBARA_SPECIES, &DUCK_SPECIES, &GOOSE_SPECIES, &BLOB_SPECIES,
-  &CAT_SPECIES, &DRAGON_SPECIES, &OCTOPUS_SPECIES, &OWL_SPECIES,
-  &PENGUIN_SPECIES, &TURTLE_SPECIES, &SNAIL_SPECIES, &GHOST_SPECIES,
-  &AXOLOTL_SPECIES, &CACTUS_SPECIES, &ROBOT_SPECIES, &RABBIT_SPECIES,
-  &MUSHROOM_SPECIES, &CHONK_SPECIES,
+  &ROBOT_SPECIES,
+  &AXOLOTL_SPECIES,
+  &BLOB_SPECIES,
+  &CACTUS_SPECIES,
+  &CAPYBARA_SPECIES,
+  &CAT_SPECIES,
+  &CHONK_SPECIES,
+  &DRAGON_SPECIES,
+  &DUCK_SPECIES,
+  &GHOST_SPECIES,
+  &GOOSE_SPECIES,
+  &MUSHROOM_SPECIES,
+  &OCTOPUS_SPECIES,
+  &OWL_SPECIES,
+  &PENGUIN_SPECIES,
+  &RABBIT_SPECIES,
+  &SNAIL_SPECIES,
+  &TURTLE_SPECIES,
 };
 static const uint8_t N_SPECIES = sizeof(SPECIES_TABLE) / sizeof(SPECIES_TABLE[0]);
 static uint8_t currentSpeciesIdx = 0;
@@ -103,12 +144,10 @@ static uint32_t tickCount  = 0;
 static uint32_t nextTickAt = 0;
 static const uint32_t TICK_MS = 200;
 
-#include "stats.h"
-
 void buddyInit() {
   tickCount = 0;
   nextTickAt = 0;
-  uint8_t saved = speciesIdxLoad();
+  uint8_t saved = _speciesIdxLoad();
   if (saved < N_SPECIES) currentSpeciesIdx = saved;
 }
 
@@ -116,18 +155,6 @@ void buddySetSpeciesIdx(uint8_t idx) {
   if (idx < N_SPECIES) currentSpeciesIdx = idx;
 }
 
-void buddySetSpecies(const char* name) {
-  for (uint8_t i = 0; i < N_SPECIES; i++) {
-    if (strcmp(SPECIES_TABLE[i]->name, name) == 0) {
-      currentSpeciesIdx = i;
-      return;
-    }
-  }
-}
-
-const char* buddySpeciesName() {
-  return SPECIES_TABLE[currentSpeciesIdx]->name;
-}
 
 uint8_t buddySpeciesCount() { return N_SPECIES; }
 
@@ -135,7 +162,7 @@ uint8_t buddySpeciesIdx() { return currentSpeciesIdx; }
 
 void buddyNextSpecies() {
   currentSpeciesIdx = (currentSpeciesIdx + 1) % N_SPECIES;
-  speciesIdxSave(currentSpeciesIdx);
+  _speciesIdxSave(currentSpeciesIdx);
 }
 
 // Only redraw when tickCount actually changes — animations run at TICK_MS

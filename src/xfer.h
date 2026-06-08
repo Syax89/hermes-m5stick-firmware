@@ -54,7 +54,11 @@ static uint32_t _xWipeAllChars() {
       freed += _xWipeDir(p);
       LittleFS.rmdir(p);
     } else {
+      char p[64];
+      snprintf(p, sizeof(p), "/characters/%s", sub.name());
+      freed += sub.size();
       sub.close();
+      LittleFS.remove(p);
     }
     sub = root.openNextFile();
   }
@@ -109,6 +113,40 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  if (strcmp(cmd, "wifi") == 0) {
+    const char* ssid = doc["ssid"];
+    const char* pass = doc["pass"];
+    if (ssid && pass) {
+      strncpy(settings().wifiSsid, ssid, sizeof(settings().wifiSsid) - 1);
+      settings().wifiSsid[sizeof(settings().wifiSsid) - 1] = 0;
+      strncpy(settings().wifiPass, pass, sizeof(settings().wifiPass) - 1);
+      settings().wifiPass[sizeof(settings().wifiPass) - 1] = 0;
+      settingsSave();
+      
+      WiFi.disconnect();
+      WiFi.begin(settings().wifiSsid, settings().wifiPass);
+      _xAck("wifi", true);
+    } else {
+      _xAck("wifi", false);
+    }
+    return true;
+  }
+
+  if (strcmp(cmd, "server") == 0) {
+    const char* ip = doc["ip"];
+    uint16_t port = doc["port"] | 0;
+    if (ip && port > 0) {
+      strncpy(settings().hermesIp, ip, sizeof(settings().hermesIp) - 1);
+      settings().hermesIp[sizeof(settings().hermesIp) - 1] = 0;
+      settings().hermesPort = port;
+      settingsSave();
+      _xAck("server", true);
+    } else {
+      _xAck("server", false);
+    }
+    return true;
+  }
+
   if (strcmp(cmd, "status") == 0) {
     // Dump everything the info screens show. Manual printf rather than
     // ArduinoJson serialize — less heap churn, and the shape is fixed.
@@ -117,7 +155,9 @@ inline bool xferCommand(JsonDocument& doc) {
     int vBus = (int)(M5.Axp.GetVBusVoltage() * 1000);
     int pct = (vBat - 3200) / 10;
     if (pct < 0) pct = 0; if (pct > 100) pct = 100;
-    char b[320];
+    Stats sSnapshot;
+    statsGetSnapshot(&sSnapshot);
+    char b[512];
     int len = snprintf(b, sizeof(b),
       "{\"ack\":\"status\",\"ok\":true,\"n\":0,\"data\":{"
       "\"name\":\"%s\",\"owner\":\"%s\",\"sec\":%s,"
@@ -130,8 +170,8 @@ inline bool xferCommand(JsonDocument& doc) {
       millis() / 1000, ESP.getFreeHeap(),
       (unsigned long)(LittleFS.totalBytes() - LittleFS.usedBytes()),
       (unsigned long)LittleFS.totalBytes(),
-      stats().approvals, stats().denials, statsMedianVelocity(),
-      (unsigned long)stats().napSeconds, stats().level
+      sSnapshot.approvals, sSnapshot.denials, statsMedianVelocity(),
+      (unsigned long)sSnapshot.napSeconds, sSnapshot.level
     );
     Serial.write(b, len);
     bleWrite((const uint8_t*)b, len);
@@ -163,11 +203,12 @@ inline bool xferCommand(JsonDocument& doc) {
     }
     // Headroom for LittleFS metadata overhead — it's not byte-for-byte.
     uint32_t available = free + reclaimable;
-    if (_xTotal > 0 && _xTotal + 4096 > available) {
-      char b[96];
+    uint32_t needed = _xTotal > 0 ? _xTotal + 4096 : 16384;
+    if (needed > available) {
+      char b[128];
       int len = snprintf(b, sizeof(b),
         "{\"ack\":\"char_begin\",\"ok\":false,\"n\":%lu,\"error\":\"need %luK, have %luK\"}\n",
-        (unsigned long)available, (unsigned long)(_xTotal/1024), (unsigned long)(available/1024)
+        (unsigned long)available, (unsigned long)(needed/1024), (unsigned long)(available/1024)
       );
       Serial.write(b, len);
       bleWrite((const uint8_t*)b, len);
@@ -228,6 +269,12 @@ inline bool xferCommand(JsonDocument& doc) {
     extern bool buddyMode, gifAvailable;
     if (ok) { buddyMode = false; gifAvailable = true; speciesIdxSave(0xFF); }
     _xAck("char_end", ok);
+    extern void applyDisplayMode();
+    extern void characterInvalidate();
+    extern void buddyInvalidate();
+    applyDisplayMode();
+    characterInvalidate();
+    if (buddyMode) buddyInvalidate();
     return true;
   }
 

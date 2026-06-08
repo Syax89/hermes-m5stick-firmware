@@ -138,12 +138,9 @@ static void gifDrawCb(GIFDRAW* d) {
 // --- Public -------------------------------------------------------------
 
 bool characterInit(const char* name) {
-  if (!LittleFS.begin(false)) {
-    // begin() fails if already mounted — that's fine on reload
-    if (!LittleFS.open("/")) {
-      Serial.println("[char] LittleFS mount failed");
-      return false;
-    }
+  if (!LittleFS.begin(true)) {
+    Serial.println("[char] LittleFS mount failed");
+    return false;
   }
 
   // No name → scan /characters/ for the first directory present.
@@ -313,7 +310,7 @@ void characterSetState(uint8_t s) {
   }
 
   uint8_t idx = stateStart[s] + stateRot[s];
-  char full[80];
+  char full[128];
   snprintf(full, sizeof(full), "%s/%s", basePath, gifPaths[idx]);
   if (gif.open(full, gifOpenCb, gifCloseCb, gifReadCb, gifSeekCb, gifDrawCb)) {
     gifOpen = true;
