@@ -79,7 +79,22 @@ M5Stick Mic -> Groq STT (whisper-large-v3-turbo) -> Hermes Chat -> Response on d
 - **Software**: [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/) (`pip install platformio`)
 - **Backend**: Hermes Agent with API server enabled + **Groq API key** for voice STT
 
-## Setup & Flashing
+## Installation Options
+
+### Option 1: Easy Web Installer (Easiest, No compilation required)
+
+1. Download the latest `merged-firmware.bin` from the [GitHub Releases](https://github.com/Syax89/hermes-m5stick-firmware/releases) page.
+2. Open **[ESP Web Flasher (esptool-js)](https://esp.github.io/esptool-js/)** in **Google Chrome** or **Microsoft Edge** (browsers supporting WebSerial).
+3. Connect your M5StickC Plus 2 to your computer via USB.
+4. Click **Connect** in the web tool and select the USB serial port of your device.
+5. Add a file to flash:
+   - Choose the downloaded `merged-firmware.bin`.
+   - Set the destination address offset to **`0x0`**.
+6. Click **Program** to flash. Once finished, reset the device (short-press the power button).
+
+---
+
+### Option 2: Build & Flash from Source
 
 1. Clone the repo:
    ```bash
@@ -93,7 +108,7 @@ M5Stick Mic -> Groq STT (whisper-large-v3-turbo) -> Hermes Chat -> Response on d
    pio run --environment m5stickc-plus
    ```
 
-   > If `pio` is not found (not in PATH), use `python3 -m platformio` instead:
+   > If `pio` is not found in your system's PATH, use `python3 -m platformio` instead:
    > ```bash
    > python3 -m platformio pkg install
    > python3 -m platformio run --environment m5stickc-plus
@@ -108,6 +123,7 @@ M5Stick Mic -> Groq STT (whisper-large-v3-turbo) -> Hermes Chat -> Response on d
    ```bash
    python3 -m platformio run --environment m5stickc-plus -t upload
    ```
+
 
 4. To erase NVS and do a clean flash:
    ```bash
